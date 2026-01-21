@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { generateSampleData, filterAssets, sortAssets, getAssetTypes, getSectors, getMarkets } from './lib/sampleData';
+import { generateSampleData, updateAssetsWithRealData, filterAssets, sortAssets, getAssetTypes, getSectors, getMarkets } from './lib/sampleData';
 import { calculatePortfolioAllocation, getScoreCategory } from './lib/scoringEngine';
 import ScoreCircle from './components/ScoreCircle';
 import AssetCard from './components/AssetCard';
@@ -27,16 +27,39 @@ function App() {
     const [riskTolerance, setRiskTolerance] = useState('moderate');
     const [refreshKey, setRefreshKey] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
+    const [realDataProgress, setRealDataProgress] = useState(0);
 
-    // 初期データ読み込み
+    // 初期データ読み込み & リアルデータ取得開始
     useEffect(() => {
         setIsLoading(true);
-        // シミュレートされたAPI呼び出し
-        setTimeout(() => {
-            const data = generateSampleData();
-            setAssets(data);
-            setIsLoading(false);
-        }, 800);
+        setRealDataProgress(0);
+
+        // 1. まずモックデータを即座に表示
+        const mockData = generateSampleData();
+        setAssets(mockData);
+        setIsLoading(false);
+
+        // 2. バックグラウンドでリアルデータを取得して更新 (非同期)
+        // ここではユーザー要望に応え全件取得を試みる（時間はかかる）
+        const fetchRealData = async () => {
+            try {
+                // 表示されている銘柄を優先するロジックを入れたいが、まずは全件
+                const updatedAssets = await updateAssetsWithRealData(mockData, (progress) => {
+                    setRealDataProgress(progress);
+                });
+                setAssets(prevAssets => {
+                    // ユーザーがフィルタ操作などをしている間にデータが変わるのを防ぐため、
+                    // 以前のアセットIDと突合して更新するのが理想だが、今回は一括置換
+                    return updatedAssets;
+                });
+            } catch (error) {
+                console.error("Failed to fetch real data:", error);
+            }
+        };
+
+        // 少し遅延させて開始（初期描画をブロックしないため）
+        setTimeout(fetchRealData, 1000);
+
     }, [refreshKey]);
 
     // フィルタリングとソート
@@ -89,6 +112,14 @@ function App() {
     return (
         <div className="app-container">
             <Header onRefresh={handleRefresh} onNavigate={setCurrentPage} currentPage={currentPage} />
+
+            {/* リアルタイムデータ取得進捗バー */}
+            {realDataProgress > 0 && realDataProgress < 100 && (
+                <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', zIndex: 9999 }}>
+                    <div style={{ width: `${realDataProgress}%`, height: '4px', background: '#3b82f6', transition: 'width 0.3s' }}></div>
+                </div>
+            )}
+
             <MarketTicker />
 
             {currentPage === 'backtest' ? (
@@ -103,7 +134,14 @@ function App() {
                         <div className="col-span-4">
                             <div className="card">
                                 <div className="card-header">
-                                    <h2 className="card-title">📊 ポートフォリオサマリー</h2>
+                                    <h2 className="card-title">
+                                        📊 ポートフォリオサマリー
+                                        {realDataProgress < 100 && realDataProgress > 0 && (
+                                            <span style={{ fontSize: '12px', fontWeight: 'normal', marginLeft: '10px', color: '#3b82f6' }}>
+                                                リアルタイムデータ取得中: {realDataProgress}%
+                                            </span>
+                                        )}
+                                    </h2>
                                     <span className="card-subtitle">全{assets.length}銘柄</span>
                                 </div>
                                 <div className="score-distribution">

@@ -413,7 +413,7 @@ function SimulatorPage() {
                 fontSize: '12px',
                 zIndex: 9999
             }}>
-                v2.1 (Dashboard 500対応版)
+                v2.2 (Real Stock Data β)
             </div>
         </div>
     );

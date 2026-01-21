@@ -1,30 +1,24 @@
 /**
- * サンプルデータ生成 (S&P 500 全銘柄対応版)
- * サーバー不要、決定論的なデータ生成によりリロードしてもスコアを維持
+ * サンプルデータ生成 (S&P 500 全銘柄対応版 + リアルデータサポート)
+ * デフォルトでは決定論的モックデータを返し、別途リアルデータで上書きする機能を提供
  */
 
 import { scoreAsset } from './scoringEngine';
 import { STOCK_DATA } from './sp500Data';
-import {
-    calculateTechnicalScore,
-    calculateMomentumScore,
-    calculateRiskScore,
-    calculateTotalScore
-} from './scoringEngine';
+import { getCachedQuotes } from './realStockData';
 
 // マスタデータをSTOCK_DATAから構築
-// STOCK_DATAは { "AAPL": { name: "Apple", sector: "Technology", ... } } 形式を想定
 const ASSETS_MASTER = Object.entries(STOCK_DATA).map(([symbol, data]) => ({
     symbol,
     name: data.name,
-    type: 'us-stock', // S&P500は全て米国株として扱う
+    type: 'us-stock', // S&P500は米国株
     sector: data.sector,
-    market: 'US', // フィルタリング用にUSで統一
+    market: 'US',
     basePrice: data.basePrice
 }));
 
 /**
- * シード付き擬似乱数生成器（simulator.jsと共有可能なロジック）
+ * シード付き擬似乱数生成器
  */
 function seededRandom(seed) {
     const x = Math.sin(seed) * 10000;
@@ -32,7 +26,7 @@ function seededRandom(seed) {
 }
 
 /**
- * シミュレーション価格を生成（決定論的）
+ * シミュレーション価格を生成（モック用）
  */
 function generateSimulatedPrice(basePrice, daysSinceStart, symbol) {
     const symbolSeed = symbol.split('').reduce((a, c, i) => a + c.charCodeAt(0) * (i + 1), 0);
@@ -52,127 +46,46 @@ function generateSimulatedPrice(basePrice, daysSinceStart, symbol) {
 }
 
 /**
- * テクニカル指標計算ヘルパー
- */
-const Indicators = {
-    ma: (prices, period) => {
-        if (prices.length < period) return prices[prices.length - 1];
-        const slice = prices.slice(-period);
-        return slice.reduce((a, b) => a + b, 0) / period;
-    },
-    rsi: (prices, period = 14) => {
-        if (prices.length < period + 1) return 50;
-        let gains = 0, losses = 0;
-        for (let i = prices.length - period; i < prices.length; i++) {
-            const change = prices[i] - prices[i - 1];
-            if (change > 0) gains += change;
-            else losses -= change;
-        }
-        if (losses === 0) return 100;
-        const rs = gains / losses;
-        return 100 - (100 / (1 + rs));
-    },
-    bollingerBands: (prices, period = 20, multiplier = 2) => {
-        if (prices.length < period) return { upper: 0, middle: 0, lower: 0 };
-        const slice = prices.slice(-period);
-        const mean = slice.reduce((a, b) => a + b, 0) / period;
-        const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
-        const stdDev = Math.sqrt(variance);
-        return { upper: mean + multiplier * stdDev, middle: mean, lower: mean - multiplier * stdDev };
-    },
-    volatility: (prices, period = 20) => {
-        if (prices.length < period) return 0;
-        const slice = prices.slice(-period);
-        const returns = [];
-        for (let i = 1; i < slice.length; i++) returns.push((slice[i] - slice[i - 1]) / slice[i - 1]);
-        const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-        const variance = returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
-        return Math.sqrt(variance) * Math.sqrt(252) * 100;
-    }
-};
-
-/**
- * 資産データを生成（決定論的）
+ * モックデータを生成（決定論的）
  */
 function generateAssetData(asset) {
     const today = new Date();
     const startDate = new Date('2024-01-01');
     const daysSinceStart = Math.floor((today - startDate) / (1000 * 60 * 60 * 24));
 
-    // 価格履歴生成 (過去130日)
-    const prices = [];
+    // 価格履歴生成 (簡易版)
     const history = [];
-    const lookback = 130;
+    const lookback = 30;
+    let currentPrice = asset.basePrice;
 
     for (let i = lookback; i >= 0; i--) {
         const price = generateSimulatedPrice(asset.basePrice, daysSinceStart - i, asset.symbol);
-        prices.push(price);
+        currentPrice = price;
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
 
-        // 直近30日は履歴として保存
-        if (i <= 30) {
-            const date = new Date(today);
-            date.setDate(date.getDate() - i);
-            history.push({
-                date: date.toISOString().split('T')[0],
-                close: price,
-                open: price * 1.002, // 簡易生成
-                high: price * 1.01,
-                low: price * 0.99,
-                volume: Math.floor(generateSimulatedPrice(1000000, i, asset.symbol)) // 音量も決定論的
-            });
-        }
+        history.push({
+            date: date.toISOString().split('T')[0],
+            close: price,
+            open: price, high: price, low: price,
+            volume: Math.floor(generateSimulatedPrice(1000000, i, asset.symbol))
+        });
     }
 
-    const currentPrice = prices[prices.length - 1];
-    const previousPrice = prices[prices.length - 2];
+    const previousPrice = history[history.length - 2].close;
 
-    // テクニカル指標計算
-    const rsi = Indicators.rsi(prices);
-    const shortMA = Indicators.ma(prices, 10);
-    const longMA = Indicators.ma(prices, 30);
-    const bb = Indicators.bollingerBands(prices);
-
-    // スコアリング用データ構築
+    // モック用のスコアリングデータ（実際にはrealStockDataで上書きされることを期待）
     const assetData = {
         technical: {
-            rsi,
-            macdLine: shortMA - longMA,
-            signalLine: 0,
-            histogram: (shortMA - longMA),
-            shortMA, longMA,
-            price: currentPrice,
-            bbUpper: bb.upper, bbMiddle: bb.middle, bbLower: bb.lower
+            rsi: 50, macdLine: 0, signalLine: 0, histogram: 0, shortMA: currentPrice, longMA: currentPrice,
+            price: currentPrice, bbUpper: currentPrice * 1.05, bbMiddle: currentPrice, bbLower: currentPrice * 0.95
         },
-        momentum: {
-            oneMonthReturn: (currentPrice / prices[prices.length - 21] - 1) * 100,
-            threeMonthReturn: (currentPrice / prices[prices.length - 63] - 1) * 100,
-            sixMonthReturn: (currentPrice / prices[0] - 1) * 100,
-            relativeStrength: 0
-        },
-        risk: {
-            volatility: Indicators.volatility(prices),
-            beta: 1.0,
-            maxDrawdown: -10,
-            sharpeRatio: 1.0
-        },
-        sentiment: { // 決定論的中立
-            newsScore: 50 + (asset.symbol.charCodeAt(0) % 20),
-            analystRating: 3,
-            epsRevision: 0,
-            socialScore: 50
-        },
-        fundamental: { // 決定論的中立
-            per: 20 + (asset.symbol.charCodeAt(1) % 15 - 7),
-            pbr: 2,
-            roe: 15,
-            revenueGrowth: 5,
-            debtRatio: 0.5,
-            dividendYield: 2,
-            industryAvgPER: 20
-        }
+        momentum: { oneMonthReturn: 0, threeMonthReturn: 0, sixMonthReturn: 0, relativeStrength: 0 },
+        risk: { volatility: 20, beta: 1.0, maxDrawdown: -10, sharpeRatio: 1.0 },
+        sentiment: { newsScore: 50, analystRating: 3, epsRevision: 0, socialScore: 50 },
+        fundamental: { per: 20, pbr: 2, roe: 15, revenueGrowth: 5, debtRatio: 0.5, dividendYield: 2, industryAvgPER: 20 }
     };
 
-    // 正しいスコアリングエンジン実行
     const scoring = scoreAsset(assetData, 'stock');
 
     return {
@@ -181,39 +94,60 @@ function generateAssetData(asset) {
         currentPrice: Math.round(currentPrice * 100) / 100,
         priceChange: Math.round(((currentPrice - previousPrice) / previousPrice) * 100 * 100) / 100,
         priceHistory: history,
-        volume: history[history[0] ? 0 : 0]?.volume || 1000000,
+        volume: history[history.length - 1].volume,
         marketCap: currentPrice * 100000000,
-        nisa: {
-            isGrowth: true,
-            isTsumitate: false,
-            categories: ['growth']
-        }
+        nisa: { isGrowth: true, isTsumitate: false, categories: ['growth'] },
+        isMock: true // モックであることを示すフラグ
     };
 }
 
-// 全資産のサンプルデータを生成
+// 全資産のサンプルデータ（モック）を生成
 export function generateSampleData() {
     return ASSETS_MASTER.map(asset => generateAssetData(asset));
 }
 
-// 単一資産のデータを更新
-export function refreshAssetData(assetSymbol) {
-    const asset = ASSETS_MASTER.find(a => a.symbol === assetSymbol);
-    if (!asset) return null;
-    return generateAssetData(asset);
+/**
+ * 【重要】リアルデータを使用して資産リストを更新
+ */
+export async function updateAssetsWithRealData(currentAssets, onProgress = null) {
+    const symbols = currentAssets.map(a => a.symbol);
+
+    // リアルデータ取得（キャッシュ優先）
+    const realDataMap = await getCachedQuotes(symbols, false, onProgress);
+
+    // 取得できたデータだけ上書き
+    return currentAssets.map(asset => {
+        const realData = realDataMap[asset.symbol];
+        if (!realData) return asset; // 取得失敗時はモックのまま
+
+        return {
+            ...asset,
+            // リアルデータで上書き
+            currentPrice: realData.currentPrice,
+            priceChange: realData.change,
+            totalScore: realData.totalScore,
+            category: realData.category,
+            factors: realData.factors,
+            priceHistory: realData.history.map(h => ({
+                date: h.date,
+                close: h.close,
+                open: h.open || h.close,
+                high: h.high || h.close,
+                low: h.low || h.close,
+                volume: h.volume || 0
+            })),
+            marketCap: realData.marketCap || asset.marketCap,
+            volume: realData.volume || asset.volume,
+            isMock: false // リアルデータになった
+        };
+    });
 }
 
 // フィルタリング
 export function filterAssets(assets, filters) {
     return assets.filter(asset => {
         if (filters.market && asset.market !== filters.market) return false;
-
-        // セクターフィルター
-        // filters.sectorが日本語で来る場合と英語で来る場合があるため柔軟に対応
-        if (filters.sector && filters.sector !== 'all') {
-            if (asset.sector !== filters.sector) return false;
-        }
-
+        if (filters.sector && filters.sector !== 'all' && asset.sector !== filters.sector) return false;
         if (filters.type && filters.type !== 'all' && asset.type !== filters.type) return false;
         if (filters.minScore && asset.totalScore < filters.minScore) return false;
         if (filters.maxScore && asset.totalScore > filters.maxScore) return false;
@@ -236,19 +170,6 @@ export function sortAssets(assets, sortBy = 'totalScore', order = 'desc') {
     });
 }
 
-// 市場一覧を取得
-export function getMarkets() {
-    return ['US'];
-}
-
-// セクター一覧を取得
-export function getSectors() {
-    return [...new Set(ASSETS_MASTER.map(a => a.sector))];
-}
-
-// 資産タイプ一覧を取得
-export function getAssetTypes() {
-    return [
-        { value: 'us-stock', label: '米国株' },
-    ];
-}
+export function getMarkets() { return ['US']; }
+export function getSectors() { return [...new Set(ASSETS_MASTER.map(a => a.sector))]; }
+export function getAssetTypes() { return [{ value: 'us-stock', label: '米国株' }]; }
