@@ -1,0 +1,40 @@
+{
+  "name": "investment-scoring-app",
+  "version": "1.0.0",
+  "description": "リアルタイム投資スコアリング＆ポートフォリオ配分アプリ",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server.mjs",
+    "simulator": "node auto-simulator.mjs --start",
+    "simulator:run": "node auto-simulator.mjs --run-once",
+    "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "investment",
+    "scoring",
+    "portfolio",
+    "stock",
+    "analysis"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chart.js": "^4.4.1",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.10.3",
+    "yahoo-finance2": "^3.11.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.10"
+  }
+}
