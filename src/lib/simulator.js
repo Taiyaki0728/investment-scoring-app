@@ -5,6 +5,12 @@
 
 // S&P 500 全銘柄データをインポート
 import { STOCK_DATA, getStockCount } from './sp500Data';
+import {
+    calculateTechnicalScore,
+    calculateMomentumScore,
+    calculateRiskScore,
+    calculateTotalScore,
+} from './scoringEngine';
 
 // 設定
 export const SIMULATOR_CONFIG = {
@@ -16,6 +22,46 @@ export const SIMULATOR_CONFIG = {
 
 // 銘柄数をエクスポート
 export { getStockCount };
+
+/**
+ * テクニカル指標計算ヘルパー
+ */
+const Indicators = {
+    ma: (prices, period) => {
+        if (prices.length < period) return prices[prices.length - 1];
+        const slice = prices.slice(-period);
+        return slice.reduce((a, b) => a + b, 0) / period;
+    },
+    rsi: (prices, period = 14) => {
+        if (prices.length < period + 1) return 50;
+        let gains = 0, losses = 0;
+        for (let i = prices.length - period; i < prices.length; i++) {
+            const change = prices[i] - prices[i - 1];
+            if (change > 0) gains += change;
+            else losses -= change;
+        }
+        if (losses === 0) return 100;
+        const rs = gains / losses;
+        return 100 - (100 / (1 + rs));
+    },
+    bollingerBands: (prices, period = 20, multiplier = 2) => {
+        if (prices.length < period) return { upper: 0, middle: 0, lower: 0 };
+        const slice = prices.slice(-period);
+        const mean = slice.reduce((a, b) => a + b, 0) / period;
+        const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
+        const stdDev = Math.sqrt(variance);
+        return { upper: mean + multiplier * stdDev, middle: mean, lower: mean - multiplier * stdDev };
+    },
+    volatility: (prices, period = 20) => {
+        if (prices.length < period) return 0;
+        const slice = prices.slice(-period);
+        const returns = [];
+        for (let i = 1; i < slice.length; i++) returns.push((slice[i] - slice[i - 1]) / slice[i - 1]);
+        const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+        const variance = returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
+        return Math.sqrt(variance) * Math.sqrt(252) * 100;
+    }
+};
 
 const STORAGE_KEYS = {
     positions: 'simulator_positions',
@@ -61,7 +107,7 @@ function generateSimulatedPrice(basePrice, daysSinceStart, symbol) {
 }
 
 /**
- * 銘柄のスコアを計算（決定論的）
+ * 銘柄のスコアを計算（決定論的かつアルゴリズム準拠）
  */
 function calculateStockScore(symbol, currentDate) {
     const stock = STOCK_DATA[symbol];
@@ -70,47 +116,66 @@ function calculateStockScore(symbol, currentDate) {
     const startDate = new Date('2024-01-01');
     const daysSinceStart = Math.floor((currentDate - startDate) / (1000 * 60 * 60 * 24));
 
-    // 過去のパフォーマンスデータを生成
+    // 分析に必要な期間の価格データを生成（過去6ヶ月分程度）
     const prices = [];
-    for (let i = 30; i >= 0; i--) {
+    const lookback = 130;
+    for (let i = lookback; i >= 0; i--) {
         prices.push(generateSimulatedPrice(stock.basePrice, daysSinceStart - i, symbol));
     }
 
-    // モメンタムスコア（過去30日の変化率）
-    const momentum = (prices[prices.length - 1] - prices[0]) / prices[0];
-    const momentumScore = Math.max(0, Math.min(100, (momentum + 0.15) / 0.3 * 100));
+    const currentPrice = prices[prices.length - 1];
 
-    // RSI（簡易版）
-    let gains = 0, losses = 0;
-    for (let i = 1; i < prices.length; i++) {
-        const change = prices[i] - prices[i - 1];
-        if (change > 0) gains += change;
-        else losses -= change;
-    }
-    const rs = losses === 0 ? 100 : gains / losses;
-    const rsi = 100 - (100 / (1 + rs));
+    // 1. テクニカル分析
+    const rsi = Indicators.rsi(prices);
+    const shortMA = Indicators.ma(prices, 10);
+    const longMA = Indicators.ma(prices, 30);
+    const signalLine = Indicators.ma(prices, 20); // 簡易代用
+    const macdLine = shortMA - longMA;
+    const histogram = macdLine - (signalLine - longMA); // 簡易計算
+    const bb = Indicators.bollingerBands(prices);
 
-    let rsiScore = 50;
-    if (rsi < 30) rsiScore = 75;
-    else if (rsi < 50) rsiScore = 60;
-    else if (rsi < 70) rsiScore = 50;
-    else rsiScore = 35;
+    const technical = calculateTechnicalScore({
+        rsi,
+        macdLine,
+        signalLine: 0, // 簡略化
+        histogram,
+        shortMA,
+        longMA,
+        price: currentPrice,
+        bbUpper: bb.upper,
+        bbMiddle: bb.middle,
+        bbLower: bb.lower
+    });
 
-    // セクタースコア（セクターごとの追加ボーナス）
-    const sectorBonus = {
-        'Technology': 5,
-        'Healthcare': 3,
-        'Financial': 2,
-        'Consumer': 0,
-        'Energy': -2,
-        'Industrial': 1,
-        'Utilities': -3,
-        'Materials': 0,
-    };
+    // 2. モメンタム分析
+    const momentum = calculateMomentumScore({
+        oneMonthReturn: (currentPrice / prices[prices.length - 21] - 1) * 100,
+        threeMonthReturn: (currentPrice / prices[prices.length - 63] - 1) * 100,
+        sixMonthReturn: (currentPrice / prices[0] - 1) * 100,
+        relativeStrength: 0 // 簡略化
+    });
 
-    // 総合スコア
-    const baseScore = momentumScore * 0.45 + rsiScore * 0.35 + 50 * 0.20;
-    return Math.round(Math.max(0, Math.min(100, baseScore + (sectorBonus[stock.sector] || 0))));
+    // 3. リスク分析
+    const volatility = Indicators.volatility(prices);
+    const risk = calculateRiskScore({
+        volatility: volatility,
+        beta: 1.0,
+        maxDrawdown: -10, // 簡略化
+        sharpeRatio: 1.0
+    });
+
+    // 4. その他（シミュレーションでは固定値）
+    const fundamental = 50 + ((stock.sector === 'Technology' || stock.sector === 'Healthcare') ? 10 : 0);
+    const sentiment = 50;
+
+    // 総合スコア計算
+    return calculateTotalScore({
+        fundamental,
+        technical,
+        momentum,
+        sentiment,
+        risk
+    });
 }
 
 /**
