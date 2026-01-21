@@ -413,7 +413,7 @@ function SimulatorPage() {
                 fontSize: '12px',
                 zIndex: 9999
             }}>
-                v2.2 (Real Stock Data β)
+                v2.3 (Optimized Weights)
             </div>
         </div>
     );

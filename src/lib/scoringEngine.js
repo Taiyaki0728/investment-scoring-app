@@ -14,13 +14,15 @@ export const SCORE_CATEGORIES = {
     CRITICAL: { min: 0, max: 19, label: '強力売り', color: 'critical', action: 'SELL_STRONG' },
 };
 
-// デフォルト重み付け
+// デフォルト重み付け (リアルデータ取得最適化版)
+// Yahoo Finance等の無料APIではファンダメンタル・センチメント情報の取得が難しいため、
+// 価格データから確実に算出可能なテクニカル・モメンタム・リスク指標を重視する設定に変更。
 export const DEFAULT_WEIGHTS = {
-    fundamental: 0.25,
-    technical: 0.25,
-    momentum: 0.20,
-    sentiment: 0.15,
-    risk: 0.15,
+    fundamental: 0.05, // データ不足のため影響度を下げる
+    technical: 0.45,   // 価格から正確に計算可能
+    momentum: 0.30,    // トレンド追従を重視
+    sentiment: 0.05,   // データ不足のため影響度を下げる
+    risk: 0.15,        // ボラティリティ等の管理
 };
 
 // 資産クラス別重み付け
@@ -28,17 +30,17 @@ export const ASSET_CLASS_WEIGHTS = {
     stock: DEFAULT_WEIGHTS,
     gold: {
         fundamental: 0.00,
-        technical: 0.35,
+        technical: 0.50,
         momentum: 0.30,
-        sentiment: 0.15,
-        risk: 0.20,
+        sentiment: 0.05,
+        risk: 0.15,
     },
     etf: {
-        fundamental: 0.15,
-        technical: 0.25,
-        momentum: 0.25,
-        sentiment: 0.15,
-        risk: 0.20,
+        fundamental: 0.05,
+        technical: 0.40,
+        momentum: 0.40, // ETFはトレンドが出やすいためモメンタム重視
+        sentiment: 0.00,
+        risk: 0.15,
     },
 };
 
