@@ -24,24 +24,44 @@ const STORAGE_KEYS = {
 };
 
 /**
- * シミュレーション価格を生成（ランダムウォーク + トレンド）
+ * シード付き擬似乱数生成器（同じシードなら同じ結果）
  */
-function generateSimulatedPrice(basePrice, daysSinceStart, symbol) {
-    // シンボルベースのシード（一貫性のため）
-    const seed = symbol.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-
-    // 日ごとの変動（±3%程度）
-    const dailyChange = 1 + (Math.sin(daysSinceStart * 0.1 + seed) * 0.02 +
-        (Math.random() - 0.5) * 0.03);
-
-    // 長期トレンド（±20%程度/年）
-    const trend = 1 + (daysSinceStart / 365) * ((seed % 40 - 20) / 100);
-
-    return basePrice * dailyChange * trend;
+function seededRandom(seed) {
+    const x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
 }
 
 /**
- * 銘柄のスコアを計算
+ * シミュレーション価格を生成（完全に決定論的）
+ * 同じシンボル・同じ日付なら必ず同じ価格
+ */
+function generateSimulatedPrice(basePrice, daysSinceStart, symbol) {
+    // シンボルベースのシード
+    const symbolSeed = symbol.split('').reduce((a, c, i) => a + c.charCodeAt(0) * (i + 1), 0);
+
+    // 日付ベースのシード
+    const daySeed = daysSinceStart * 7919; // 素数を使用
+
+    // 複数の波を組み合わせて自然な価格変動を模倣（完全に決定論的）
+    const wave1 = Math.sin((daysSinceStart + symbolSeed) * 0.05) * 0.03;
+    const wave2 = Math.sin((daysSinceStart + symbolSeed) * 0.15) * 0.015;
+    const wave3 = Math.sin((daysSinceStart + symbolSeed) * 0.02) * 0.05;
+
+    // シード付き微小変動（日ごとに異なるが決定論的）
+    const microNoise = seededRandom(daySeed + symbolSeed) * 0.02 - 0.01;
+
+    // 日ごとの変動を合算
+    const dailyVariation = 1 + wave1 + wave2 + wave3 + microNoise;
+
+    // 長期トレンド（セクターと銘柄特性による）
+    const trendFactor = ((symbolSeed % 40) - 20) / 100; // -20% to +20% 年間
+    const trend = 1 + (daysSinceStart / 365) * trendFactor;
+
+    return basePrice * dailyVariation * trend;
+}
+
+/**
+ * 銘柄のスコアを計算（決定論的）
  */
 function calculateStockScore(symbol, currentDate) {
     const stock = STOCK_DATA[symbol];
