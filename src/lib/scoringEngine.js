@@ -14,15 +14,15 @@ export const SCORE_CATEGORIES = {
     CRITICAL: { min: 0, max: 19, label: '強力売り', color: 'critical', action: 'SELL_STRONG' },
 };
 
-// デフォルト重み付け (リアルデータ取得最適化版)
-// Yahoo Finance等の無料APIではファンダメンタル・センチメント情報の取得が難しいため、
-// 価格データから確実に算出可能なテクニカル・モメンタム・リスク指標を重視する設定に変更。
+// デフォルト重み付け (リアルデータ v2 最適化版)
+// Fundamental/Sentimentデータ取得機能を追加したため、これらの比重を少し戻す。
+// バランス型: Technical 40%, Momentum 25%, Risk 15%, Fund 10%, Sent 10%
 export const DEFAULT_WEIGHTS = {
-    fundamental: 0.05, // データ不足のため影響度を下げる
-    technical: 0.45,   // 価格から正確に計算可能
-    momentum: 0.30,    // トレンド追従を重視
-    sentiment: 0.05,   // データ不足のため影響度を下げる
-    risk: 0.15,        // ボラティリティ等の管理
+    fundamental: 0.10, // データ取得可能になったため引き上げ
+    technical: 0.40,   // 引き続き最重要
+    momentum: 0.25,    // 同じく重要
+    sentiment: 0.10,   // アナリスト評価を反映
+    risk: 0.15,        // リスク管理
 };
 
 // 資産クラス別重み付け
@@ -36,10 +36,10 @@ export const ASSET_CLASS_WEIGHTS = {
         risk: 0.15,
     },
     etf: {
-        fundamental: 0.05,
-        technical: 0.40,
-        momentum: 0.40, // ETFはトレンドが出やすいためモメンタム重視
-        sentiment: 0.00,
+        fundamental: 0.10,
+        technical: 0.35,
+        momentum: 0.35,
+        sentiment: 0.05,
         risk: 0.15,
     },
 };

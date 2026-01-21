@@ -5,11 +5,72 @@
  */
 
 import {
-    scoreAsset,
-    calculateTotalScore
+    scoreAsset
 } from './scoringEngine';
 
 const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+/**
+ * Fundamental & Sentimentデータを取得
+ * quoteSummaryエンドポイントを使用
+ */
+async function fetchFundamentalData(symbol) {
+    try {
+        // 必要なモジュールを指定 (財務データ, 統計, アナリスト推奨)
+        const modules = 'financialData,defaultKeyStatistics,recommendationTrend';
+        const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=${modules}`;
+        const response = await fetch(CORS_PROXY + encodeURIComponent(url));
+
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        const result = data.quoteSummary?.result?.[0];
+
+        if (!result) return null;
+
+        const fin = result.financialData || {};
+        const stats = result.defaultKeyStatistics || {};
+        const trend = result.recommendationTrend?.trend?.[0] || {};
+
+        // アナリスト評価（1=Strong Buy, 5=Sellなので逆転させる必要あり、またはトレンド数を使う）
+        // ここではトレンド構成比からスコアを算出
+        let analystRating = 3; // default hold
+        const totalRatings = (trend.strongBuy || 0) + (trend.buy || 0) + (trend.hold || 0) + (trend.sell || 0) + (trend.strongSell || 0);
+        if (totalRatings > 0) {
+            // 加重平均スコア (5:StrongBuy ... 1:StrongSell)
+            const weightedSum =
+                (trend.strongBuy || 0) * 5 +
+                (trend.buy || 0) * 4 +
+                (trend.hold || 0) * 3 +
+                (trend.sell || 0) * 2 +
+                (trend.strongSell || 0) * 1;
+            analystRating = weightedSum / totalRatings;
+        } else if (fin.recommendationMean) {
+            // 1(Strong Buy) - 5(Strong Sell) 形式の平均値がある場合
+            // 1->5, 5->1 に変換
+            analystRating = 6 - (fin.recommendationMean.raw || 3);
+        }
+
+        return {
+            fundamental: {
+                per: stats.forwardPE?.raw || fin.currentPrice?.raw / (stats.trailingEps?.raw || 1) || 20,
+                pbr: stats.priceToBook?.raw || 2,
+                roe: (fin.returnOnEquity?.raw || 0.1) * 100, // %表記に変換
+                revenueGrowth: (fin.revenueGrowth?.raw || 0.05) * 100,
+                debtRatio: fin.debtToEquity?.raw ? fin.debtToEquity.raw / 100 : 0.5,
+                dividendYield: (fin.dividendYield?.raw || 0) * 100,
+                targetPrice: fin.targetMeanPrice?.raw
+            },
+            sentiment: {
+                analystRating: analystRating, // 1-5 scale (5=Best)
+                recommendationKey: fin.recommendationKey // 'buy', 'hold' etc.
+            }
+        };
+    } catch (error) {
+        console.warn(`Failed to fetch fundamental for ${symbol}:`, error.message);
+        return null;
+    }
+}
 
 /**
  * Yahoo Finance APIからリアルタイム価格を取得
@@ -21,18 +82,21 @@ async function fetchYahooQuote(symbol) {
     const querySymbol = symbol;
 
     try {
-        // 6ヶ月分のデータを取得
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${querySymbol}?interval=1d&range=6mo`;
-        const response = await fetch(CORS_PROXY + encodeURIComponent(url));
+        // 並列でデータ取得：価格履歴 & ファンダメンタル
+        const [chartDataResult, fundamentalResult] = await Promise.all([
+            (async () => {
+                // 6ヶ月分のデータを取得
+                const url = `https://query1.finance.yahoo.com/v8/finance/chart/${querySymbol}?interval=1d&range=6mo`;
+                const response = await fetch(CORS_PROXY + encodeURIComponent(url));
+                if (!response.ok) return null;
+                return response.json();
+            })(),
+            fetchFundamentalData(querySymbol)
+        ]);
 
-        if (!response.ok) {
-            console.warn(`HTTP error fetching ${symbol}: ${response.status}`);
-            return null;
-        }
-
-        const data = await response.json();
-        const result = data.chart?.result?.[0];
-
+        // チャートデータの処理
+        if (!chartDataResult) return null; // チャートがないと始まらない
+        const result = chartDataResult.chart?.result?.[0];
         if (!result) return null;
 
         const meta = result.meta;
@@ -56,6 +120,10 @@ async function fetchYahooQuote(symbol) {
         const currentPrice = meta.regularMarketPrice || cleanData[cleanData.length - 1].close;
         const previousClose = meta.previousClose || cleanData[cleanData.length - 2].close;
 
+        // ファンダメンタルデータの結合
+        const fundamentalData = fundamentalResult ? fundamentalResult.fundamental : {};
+        const sentimentData = fundamentalResult ? fundamentalResult.sentiment : {};
+
         return {
             symbol,
             currentPrice,
@@ -66,11 +134,14 @@ async function fetchYahooQuote(symbol) {
             volume: meta.regularMarketVolume,
             marketCap: meta.marketCap || 0,
             history: cleanData, // 全履歴
-            closes: cleanData.map(d => d.close) // 計算用
+            closes: cleanData.map(d => d.close), // 計算用
+            // 追加データ
+            fundamental: fundamentalData,
+            sentiment: sentimentData
         };
     } catch (error) {
         console.warn(`Failed to fetch ${symbol}:`, error.message);
-        return null;
+        return null; // 重大なエラー
     }
 }
 
@@ -140,44 +211,36 @@ function calculateRealScore(quoteData) {
     // 3. リスク分析
     const volatility = Indicators.volatility(prices);
 
+    // 4. ファンダメンタル & センチメント (取得できていれば使用、なければデフォルト)
+    const fund = quoteData.fundamental || {};
+    const sent = quoteData.sentiment || {};
+
     // AssetData構築
     const assetData = {
         technical: {
-            rsi,
-            macdLine,
-            signalLine: 0,
-            histogram: macdLine, // 簡易
-            shortMA, longMA,
-            price: currentPrice,
+            rsi, macdLine, signalLine: 0, histogram: macdLine,
+            shortMA, longMA, price: currentPrice,
             bbUpper: bb.upper, bbMiddle: bb.middle, bbLower: bb.lower
         },
         momentum: {
-            oneMonthReturn,
-            threeMonthReturn,
-            sixMonthReturn,
-            relativeStrength: 0 // 比較対象なしのため0
+            oneMonthReturn, threeMonthReturn, sixMonthReturn, relativeStrength: 0
         },
         risk: {
-            volatility,
-            beta: 1.0,
-            maxDrawdown: -10, // 簡易
-            sharpeRatio: 1.0
+            volatility, beta: 1.0, maxDrawdown: -10, sharpeRatio: 1.0
         },
-        // Yahoo Financeの無料APIではファンダメンタルやセンチメントは取得困難なため、
-        // ニュートラル値またはランダムなシード値で埋める（完全な0だとスコアが低くなりすぎる）
         sentiment: {
-            newsScore: 50,
-            analystRating: 3,
+            newsScore: 50, // ニュースは取得困難
+            analystRating: sent.analystRating || 3, // アナリスト評価を使用！
             epsRevision: 0,
             socialScore: 50
         },
         fundamental: {
-            per: 20,
-            pbr: 2,
-            roe: 10,
-            revenueGrowth: 5,
-            debtRatio: 0.5,
-            dividendYield: 2,
+            per: fund.per || 20,
+            pbr: fund.pbr || 2,
+            roe: fund.roe || 10,
+            revenueGrowth: fund.revenueGrowth || 5,
+            debtRatio: fund.debtRatio || 0.5,
+            dividendYield: fund.dividendYield || 2,
             industryAvgPER: 20
         }
     };
@@ -190,11 +253,11 @@ function calculateRealScore(quoteData) {
  */
 export async function fetchMultipleQuotes(symbols, onProgress = null) {
     const results = {};
-    const batchSize = 3; // レート制限回避のため少なめに
+    const batchSize = 3;
 
     for (let i = 0; i < symbols.length; i += batchSize) {
         const batch = symbols.slice(i, i + batchSize);
-        // 並列処理だが、それぞれの完了を待つ
+        // 並列処理
         const promises = batch.map(s => fetchYahooQuote(s));
         const batchResults = await Promise.all(promises);
 
@@ -204,12 +267,11 @@ export async function fetchMultipleQuotes(symbols, onProgress = null) {
                 const scoring = calculateRealScore(result);
                 results[symbol] = {
                     ...result,
-                    ...scoring, // totalScore, factors, etc.
-                    // UI互換性のフィールド
+                    ...scoring, // totalScoreなど
                     rawData: scoring.rawData,
                     market: 'US',
                     type: 'us-stock',
-                    sector: 'Unknown', // セクター情報は失われるので後でマージが必要
+                    sector: 'Unknown', // セクターはsp500Data等から補完推奨
                 };
             }
         });
@@ -218,7 +280,7 @@ export async function fetchMultipleQuotes(symbols, onProgress = null) {
             onProgress(Math.min(100, Math.round(((i + batchSize) / symbols.length) * 100)));
         }
 
-        // インターバル（無料APIへの攻撃とみなされないように）
+        // 負荷軽減のため少し待機
         if (i + batchSize < symbols.length) {
             await new Promise(r => setTimeout(r, 800));
         }
@@ -227,11 +289,8 @@ export async function fetchMultipleQuotes(symbols, onProgress = null) {
     return results;
 }
 
-/**
- * キャッシュ付きデータ取得
- */
-const CACHE_KEY = 'real_stock_quotes_v1';
-const CACHE_DURATION = 15 * 60 * 1000; // 15分キャッシュ
+const CACHE_KEY = 'real_stock_quotes_v2'; // バージョンアップ
+const CACHE_DURATION = 30 * 60 * 1000; // データが増えたのでキャッシュ期間を30分に延長
 
 export async function getCachedQuotes(symbols, forceRefresh = false, onProgress = null) {
     const now = Date.now();
@@ -253,22 +312,20 @@ export async function getCachedQuotes(symbols, forceRefresh = false, onProgress 
     const missingSymbols = symbols.filter(s => !cachedData[s]);
 
     if (missingSymbols.length > 0) {
-        if (onProgress) onProgress(10); // 開始の合図
+        if (onProgress) onProgress(10);
         const freshData = await fetchMultipleQuotes(missingSymbols, (p) => {
-            if (onProgress) onProgress(10 + (p * 0.9)); // 10%〜100%
+            if (onProgress) onProgress(10 + (p * 0.9));
         });
 
-        // マージ
         cachedData = { ...cachedData, ...freshData };
 
-        // 保存
         try {
             localStorage.setItem(CACHE_KEY, JSON.stringify({
                 data: cachedData,
                 timestamp: now,
             }));
         } catch (e) {
-            console.warn('Cache write failed (storage full?):', e);
+            console.warn('Cache write failed (Storage full?):', e);
         }
     } else {
         if (onProgress) onProgress(100);
