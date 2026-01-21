@@ -7,6 +7,7 @@ import {
     getCurrentPrices,
     calculateStats,
     SIMULATOR_CONFIG,
+    getStockCount,
 } from '../lib/simulator';
 
 function SimulatorPage() {
@@ -73,7 +74,7 @@ function SimulatorPage() {
                 <div className="simulator-title">
                     <h1>🤖 自動売買シミュレーター</h1>
                     <p className="simulator-subtitle">
-                        AI スコアリングに基づく自動ポートフォリオ運用
+                        S&P 500 全{getStockCount()}銘柄からAIスコアリングで自動運用
                     </p>
                 </div>
                 <div className="simulator-actions">

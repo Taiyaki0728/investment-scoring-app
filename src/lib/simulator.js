@@ -3,6 +3,9 @@
  * LocalStorageを使用してサーバーなしで動作
  */
 
+// S&P 500 全銘柄データをインポート
+import { STOCK_DATA, getStockCount } from './sp500Data';
+
 // 設定
 export const SIMULATOR_CONFIG = {
     initialCapital: 1000000,  // 初期費用: 100万円
@@ -11,59 +14,8 @@ export const SIMULATOR_CONFIG = {
     rebalanceDay: 1,
 };
 
-// S&P500 上位50銘柄とモック価格データ
-const STOCK_DATA = {
-    'AAPL': { name: 'Apple Inc.', sector: 'Technology', basePrice: 185 },
-    'MSFT': { name: 'Microsoft Corporation', sector: 'Technology', basePrice: 378 },
-    'GOOGL': { name: 'Alphabet Inc.', sector: 'Technology', basePrice: 142 },
-    'AMZN': { name: 'Amazon.com Inc.', sector: 'Consumer', basePrice: 178 },
-    'NVDA': { name: 'NVIDIA Corporation', sector: 'Technology', basePrice: 495 },
-    'META': { name: 'Meta Platforms Inc.', sector: 'Technology', basePrice: 390 },
-    'TSLA': { name: 'Tesla Inc.', sector: 'Consumer', basePrice: 248 },
-    'JPM': { name: 'JPMorgan Chase & Co.', sector: 'Financial', basePrice: 172 },
-    'JNJ': { name: 'Johnson & Johnson', sector: 'Healthcare', basePrice: 156 },
-    'V': { name: 'Visa Inc.', sector: 'Financial', basePrice: 275 },
-    'UNH': { name: 'UnitedHealth Group', sector: 'Healthcare', basePrice: 527 },
-    'HD': { name: 'Home Depot Inc.', sector: 'Consumer', basePrice: 345 },
-    'PG': { name: 'Procter & Gamble', sector: 'Consumer', basePrice: 158 },
-    'MA': { name: 'Mastercard Inc.', sector: 'Financial', basePrice: 428 },
-    'XOM': { name: 'Exxon Mobil Corp.', sector: 'Energy', basePrice: 105 },
-    'LLY': { name: 'Eli Lilly & Co.', sector: 'Healthcare', basePrice: 752 },
-    'ABBV': { name: 'AbbVie Inc.', sector: 'Healthcare', basePrice: 172 },
-    'MRK': { name: 'Merck & Co. Inc.', sector: 'Healthcare', basePrice: 107 },
-    'CVX': { name: 'Chevron Corporation', sector: 'Energy', basePrice: 153 },
-    'PEP': { name: 'PepsiCo Inc.', sector: 'Consumer', basePrice: 172 },
-    'COST': { name: 'Costco Wholesale', sector: 'Consumer', basePrice: 702 },
-    'KO': { name: 'Coca-Cola Company', sector: 'Consumer', basePrice: 62 },
-    'AVGO': { name: 'Broadcom Inc.', sector: 'Technology', basePrice: 1185 },
-    'WMT': { name: 'Walmart Inc.', sector: 'Consumer', basePrice: 162 },
-    'TMO': { name: 'Thermo Fisher Scientific', sector: 'Healthcare', basePrice: 542 },
-    'MCD': { name: "McDonald's Corp.", sector: 'Consumer', basePrice: 295 },
-    'CSCO': { name: 'Cisco Systems Inc.', sector: 'Technology', basePrice: 51 },
-    'ABT': { name: 'Abbott Laboratories', sector: 'Healthcare', basePrice: 113 },
-    'ACN': { name: 'Accenture PLC', sector: 'Technology', basePrice: 340 },
-    'DHR': { name: 'Danaher Corporation', sector: 'Healthcare', basePrice: 252 },
-    'NEE': { name: 'NextEra Energy', sector: 'Utilities', basePrice: 72 },
-    'LIN': { name: 'Linde PLC', sector: 'Materials', basePrice: 433 },
-    'ADBE': { name: 'Adobe Inc.', sector: 'Technology', basePrice: 568 },
-    'CRM': { name: 'Salesforce Inc.', sector: 'Technology', basePrice: 265 },
-    'TXN': { name: 'Texas Instruments', sector: 'Technology', basePrice: 171 },
-    'PM': { name: 'Philip Morris Intl.', sector: 'Consumer', basePrice: 95 },
-    'NKE': { name: 'Nike Inc.', sector: 'Consumer', basePrice: 106 },
-    'RTX': { name: 'RTX Corporation', sector: 'Industrial', basePrice: 92 },
-    'AMD': { name: 'AMD Inc.', sector: 'Technology', basePrice: 125 },
-    'ORCL': { name: 'Oracle Corporation', sector: 'Technology', basePrice: 118 },
-    'NFLX': { name: 'Netflix Inc.', sector: 'Technology', basePrice: 485 },
-    'INTC': { name: 'Intel Corporation', sector: 'Technology', basePrice: 42 },
-    'HON': { name: 'Honeywell Intl.', sector: 'Industrial', basePrice: 205 },
-    'UPS': { name: 'United Parcel Service', sector: 'Industrial', basePrice: 155 },
-    'QCOM': { name: 'Qualcomm Inc.', sector: 'Technology', basePrice: 145 },
-    'LOW': { name: "Lowe's Companies", sector: 'Consumer', basePrice: 238 },
-    'INTU': { name: 'Intuit Inc.', sector: 'Technology', basePrice: 628 },
-    'BA': { name: 'Boeing Company', sector: 'Industrial', basePrice: 215 },
-    'CAT': { name: 'Caterpillar Inc.', sector: 'Industrial', basePrice: 295 },
-    'GS': { name: 'Goldman Sachs', sector: 'Financial', basePrice: 385 },
-};
+// 銘柄数をエクスポート
+export { getStockCount };
 
 const STORAGE_KEYS = {
     positions: 'simulator_positions',
