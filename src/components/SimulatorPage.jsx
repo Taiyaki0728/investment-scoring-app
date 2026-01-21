@@ -398,6 +398,22 @@ function SimulatorPage() {
                         )}
                     </div>
                 )}
+
+            </div>
+
+            {/* バージョン情報（デバッグ用） */}
+            <div style={{
+                position: 'fixed',
+                bottom: '10px',
+                right: '10px',
+                background: 'rgba(0,0,0,0.7)',
+                color: 'white',
+                padding: '5px 10px',
+                borderRadius: '5px',
+                fontSize: '12px',
+                zIndex: 9999
+            }}>
+                v2.0 (S&P 500対応版)
             </div>
         </div>
     );
